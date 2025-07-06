@@ -15,15 +15,19 @@ import {
   Eye,
   EyeOff,
   Target,
-  TrendingUp
+  TrendingUp,
+  Save,
+  Edit3,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import Button from '../UI/Button';
 import { Assignment, AssignmentSubmission, AssignmentResult } from '../../types/assignment';
-import { getTimeRemaining, isAssignmentOverdue } from '../../services/assignmentService';
+import { getTimeRemaining, isAssignmentOverdue, canEditAssignment } from '../../services/assignmentService';
 
 interface AssignmentInterfaceProps {
   assignment: Assignment;
-  onSubmit: (answers: Record<string, any>) => void;
+  onSubmit: (answers: Record<string, any>, isFinal: boolean) => void;
   onCancel: () => void;
   onStart: () => void;
   isLoading: boolean;
@@ -51,6 +55,14 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
   const [assignmentStarted, setAssignmentStarted] = useState(false);
   const [assignmentCompleted, setAssignmentCompleted] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [autoSaveTimer, setAutoSaveTimer] = useState<NodeJS.Timeout | null>(null);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  const isOverdue = isAssignmentOverdue(assignment);
+  const timeLeft = getTimeRemaining(assignment.dueDate);
+  const canEdit = canEditAssignment(assignment);
+  const deadlinePassed = assignmentResult?.deadlinePassed || false;
 
   useEffect(() => {
     if (assignment.timeLimit && assignmentStarted && !assignmentCompleted) {
@@ -65,19 +77,44 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
       }, 1000);
       return () => clearTimeout(timer);
     } else if (timeRemaining === 0 && !assignmentCompleted) {
-      handleSubmit();
+      handleSubmit(true); // Auto-submit when time runs out
     }
   }, [timeRemaining, assignmentCompleted]);
 
   useEffect(() => {
     if (latestSubmission) {
       setAnswers(latestSubmission.answers);
-      setAssignmentCompleted(true);
-      if (assignmentResult) {
-        setShowResults(true);
+      setAssignmentStarted(true);
+      
+      if (latestSubmission.isSubmitted) {
+        setAssignmentCompleted(true);
+        if (assignmentResult) {
+          setShowResults(true);
+        }
       }
     }
   }, [latestSubmission, assignmentResult]);
+
+  // Auto-save functionality
+  useEffect(() => {
+    if (hasUnsavedChanges && assignmentStarted && !assignmentCompleted && canEdit) {
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+      }
+      
+      const timer = setTimeout(() => {
+        handleAutoSave();
+      }, 3000); // Auto-save after 3 seconds of inactivity
+      
+      setAutoSaveTimer(timer);
+    }
+    
+    return () => {
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+      }
+    };
+  }, [answers, hasUnsavedChanges]);
 
   const handleStart = () => {
     setAssignmentStarted(true);
@@ -92,11 +129,25 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
       ...prev,
       [questionId]: answer
     }));
+    setHasUnsavedChanges(true);
   };
 
-  const handleSubmit = () => {
-    setAssignmentCompleted(true);
-    onSubmit(answers);
+  const handleAutoSave = () => {
+    if (!canEdit) return;
+    
+    onSubmit(answers, false); // Save as draft
+    setHasUnsavedChanges(false);
+    setLastSaved(new Date());
+  };
+
+  const handleSubmit = (isFinal: boolean = true) => {
+    setAssignmentCompleted(isFinal);
+    onSubmit(answers, isFinal);
+    setHasUnsavedChanges(false);
+    
+    if (isFinal) {
+      setLastSaved(new Date());
+    }
   };
 
   const handleRetake = () => {
@@ -105,6 +156,8 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
     setShowResults(false);
     setAnswers({});
     setTimeRemaining(null);
+    setHasUnsavedChanges(false);
+    setLastSaved(null);
     onRetake?.();
   };
 
@@ -135,15 +188,12 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
     return requiredAnswered === requiredQuestions.length;
   };
 
-  const isOverdue = isAssignmentOverdue(assignment);
-  const timeLeft = getTimeRemaining(assignment.dueDate);
-
   // Full screen overlay
   const overlayClasses = "fixed inset-0 z-50 bg-dark-900 overflow-y-auto";
 
   // Assignment Results View
   if (showResults && assignmentResult) {
-    const { submission, feedback, canViewAnswers } = assignmentResult;
+    const { submission, feedback, canViewAnswers, deadlinePassed } = assignmentResult;
     
     return (
       <div className={overlayClasses}>
@@ -163,30 +213,53 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
           <div className="max-w-4xl mx-auto space-y-6">
             <div className="bg-dark-800 rounded-xl p-8 text-center">
               <div className={`w-24 h-24 rounded-full mx-auto mb-6 flex items-center justify-center ${
-                submission.score && submission.score >= 70 ? 'bg-accent-600' : 'bg-orange-600'
+                deadlinePassed 
+                  ? (submission.score && submission.score >= 70 ? 'bg-accent-600' : 'bg-orange-600')
+                  : 'bg-blue-600'
               }`}>
-                {submission.score && submission.score >= 70 ? (
-                  <CheckCircle className="h-12 w-12 text-white" />
+                {deadlinePassed ? (
+                  submission.score && submission.score >= 70 ? (
+                    <CheckCircle className="h-12 w-12 text-white" />
+                  ) : (
+                    <Clock className="h-12 w-12 text-white" />
+                  )
                 ) : (
-                  <Clock className="h-12 w-12 text-white" />
+                  <FileText className="h-12 w-12 text-white" />
                 )}
               </div>
               
               <h2 className="text-3xl font-bold text-white mb-2">
-                Assignment Submitted!
+                {deadlinePassed 
+                  ? (submission.score && submission.score >= 70 ? 'Assignment Complete!' : 'Assignment Submitted')
+                  : 'Assignment Submitted!'
+                }
               </h2>
               
               <p className="text-xl text-dark-300 mb-6">
-                {submission.score !== undefined 
+                {deadlinePassed && submission.score !== undefined
                   ? `You scored ${submission.score}% on ${assignment.title}`
                   : `Your submission for ${assignment.title} has been received`
                 }
               </p>
 
+              {!deadlinePassed && (
+                <div className="bg-blue-600/10 border border-blue-600/20 p-4 rounded-lg mb-6">
+                  <div className="flex items-center justify-center text-blue-400">
+                    <Clock className="h-5 w-5 mr-2" />
+                    <span className="font-medium">
+                      Results will be available after the deadline: {new Date(assignment.dueDate).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-blue-300 text-sm mt-2">
+                    You can still edit your answers until the deadline passes.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 <div className="bg-dark-700 p-4 rounded-lg">
                   <div className="text-2xl font-bold text-white mb-1">
-                    {submission.score !== undefined ? `${submission.score}%` : 'Pending'}
+                    {deadlinePassed && submission.score !== undefined ? `${submission.score}%` : 'Pending'}
                   </div>
                   <div className="text-dark-400">Your Score</div>
                 </div>
@@ -212,7 +285,19 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                 <Button onClick={onGoBack || onCancel} icon={<ArrowLeft className="h-4 w-4" />}>
                   Back to Course
                 </Button>
-                {canSubmit && (
+                {canSubmit && canEdit && !deadlinePassed && (
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setShowResults(false);
+                      setAssignmentCompleted(false);
+                    }}
+                    icon={<Edit3 className="h-4 w-4" />}
+                  >
+                    Edit Answers
+                  </Button>
+                )}
+                {canSubmit && deadlinePassed && (
                   <Button 
                     variant="outline" 
                     onClick={handleRetake}
@@ -224,8 +309,8 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
               </div>
             </div>
 
-            {/* Detailed Results */}
-            {canViewAnswers && (
+            {/* Detailed Results - Only show after deadline */}
+            {deadlinePassed && canViewAnswers && (
               <div className="bg-dark-800 rounded-xl p-6">
                 <h3 className="text-xl font-semibold text-white mb-6">Question Review</h3>
                 
@@ -244,7 +329,7 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                               {questionFeedback.isCorrect ? (
                                 <CheckCircle className="h-5 w-5 text-white" />
                               ) : (
-                                <Clock className="h-5 w-5 text-white" />
+                                <XCircle className="h-5 w-5 text-white" />
                               )}
                             </div>
                             <span className="text-sm font-medium text-dark-300">Question {index + 1}</span>
@@ -341,13 +426,21 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
               </div>
             )}
 
-            {!canViewAnswers && (
+            {!deadlinePassed && (
               <div className="bg-dark-800 rounded-xl p-6 text-center">
-                <EyeOff className="h-12 w-12 text-dark-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-white mb-2">Answers Not Available Yet</h3>
-                <p className="text-dark-300">
-                  Answers and detailed feedback will be available after the assignment deadline.
+                <Clock className="h-12 w-12 text-blue-400 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-white mb-2">Results Pending</h3>
+                <p className="text-dark-300 mb-4">
+                  Your answers have been saved. Results and feedback will be available after the deadline.
                 </p>
+                <div className="bg-blue-600/10 border border-blue-600/20 p-4 rounded-lg">
+                  <p className="text-blue-400 font-medium">
+                    Deadline: {new Date(assignment.dueDate).toLocaleString()}
+                  </p>
+                  <p className="text-blue-300 text-sm mt-1">
+                    Time remaining: {timeLeft}
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -418,14 +511,15 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                 </div>
               )}
 
-              <div className="bg-orange-600/10 border border-orange-600/20 p-4 rounded-lg">
+              <div className="bg-blue-600/10 border border-blue-600/20 p-4 rounded-lg">
                 <div className="flex items-start">
-                  <AlertTriangle className="h-5 w-5 text-orange-400 mr-2 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-orange-300">
+                  <AlertTriangle className="h-5 w-5 text-blue-400 mr-2 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-blue-300">
                     <p className="font-medium mb-1">Important Notes:</p>
-                    <ul className="space-y-1 text-orange-200">
-                      <li>• You can save your progress and return later before the deadline</li>
-                      <li>• Make sure to submit before the due date</li>
+                    <ul className="space-y-1 text-blue-200">
+                      <li>• Your answers are automatically saved as you work</li>
+                      <li>• You can edit your answers until the deadline</li>
+                      <li>• Results will be shown after the deadline passes</li>
                       {assignment.timeLimit && <li>• The assignment will auto-submit when time runs out</li>}
                       <li>• You have {assignment.maxAttempts} attempt{assignment.maxAttempts > 1 ? 's' : ''} to complete this assignment</li>
                       {assignment.allowLateSubmission && (
@@ -481,6 +575,13 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                 <Calendar className="h-4 w-4" />
                 <span className="text-sm">{timeLeft}</span>
               </div>
+
+              {!canEdit && (
+                <div className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-orange-600/20 text-orange-400">
+                  <Lock className="h-4 w-4" />
+                  <span className="text-sm">Deadline Passed</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -500,6 +601,30 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
               {Math.round((getAnsweredCount() / assignment.questions.length) * 100)}%
             </span>
           </div>
+
+          {/* Auto-save indicator */}
+          {canEdit && (
+            <div className="flex items-center justify-between mt-2 text-xs">
+              <div className="flex items-center space-x-2">
+                {hasUnsavedChanges ? (
+                  <span className="text-orange-400">Unsaved changes...</span>
+                ) : lastSaved ? (
+                  <span className="text-accent-400">
+                    Last saved: {lastSaved.toLocaleTimeString()}
+                  </span>
+                ) : null}
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handleAutoSave()}
+                disabled={!hasUnsavedChanges}
+                icon={<Save className="h-3 w-3" />}
+              >
+                Save Draft
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Questions List */}
@@ -540,7 +665,9 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                   {question.options.map((option, optIndex) => (
                     <label
                       key={optIndex}
-                      className={`flex items-center p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                      className={`flex items-center p-4 rounded-lg border-2 transition-all ${
+                        canEdit ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+                      } ${
                         answers[question.id] === optIndex
                           ? 'border-primary-600 bg-primary-600/10'
                           : 'border-dark-600 hover:border-dark-500'
@@ -551,7 +678,8 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                         name={question.id}
                         value={optIndex}
                         checked={answers[question.id] === optIndex}
-                        onChange={() => handleAnswerChange(question.id, optIndex)}
+                        onChange={() => canEdit && handleAnswerChange(question.id, optIndex)}
+                        disabled={!canEdit}
                         className="sr-only"
                       />
                       <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center ${
@@ -572,9 +700,10 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
               {question.type === 'short-answer' && (
                 <textarea
                   value={answers[question.id] || ''}
-                  onChange={(e) => handleAnswerChange(question.id, e.target.value)}
-                  placeholder="Enter your answer..."
-                  className="w-full p-4 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                  onChange={(e) => canEdit && handleAnswerChange(question.id, e.target.value)}
+                  disabled={!canEdit}
+                  placeholder={canEdit ? "Enter your answer..." : "Answer locked after deadline"}
+                  className="w-full p-4 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                   rows={3}
                 />
               )}
@@ -582,18 +711,27 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
               {question.type === 'essay' && (
                 <textarea
                   value={answers[question.id] || ''}
-                  onChange={(e) => handleAnswerChange(question.id, e.target.value)}
-                  placeholder="Write your essay response..."
-                  className="w-full p-4 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                  onChange={(e) => canEdit && handleAnswerChange(question.id, e.target.value)}
+                  disabled={!canEdit}
+                  placeholder={canEdit ? "Write your essay response..." : "Answer locked after deadline"}
+                  className="w-full p-4 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                   rows={8}
                 />
               )}
 
               {question.type === 'file-upload' && (
-                <div className="border-2 border-dashed border-dark-600 rounded-lg p-8 text-center">
+                <div className={`border-2 border-dashed border-dark-600 rounded-lg p-8 text-center ${
+                  !canEdit ? 'opacity-50' : ''
+                }`}>
                   <Upload className="h-12 w-12 text-dark-400 mx-auto mb-4" />
-                  <p className="text-dark-300 mb-4">Upload your file here</p>
-                  <Button variant="outline" icon={<Upload className="h-4 w-4" />}>
+                  <p className="text-dark-300 mb-4">
+                    {canEdit ? "Upload your file here" : "File upload locked after deadline"}
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    icon={<Upload className="h-4 w-4" />}
+                    disabled={!canEdit}
+                  >
                     Choose File
                   </Button>
                 </div>
@@ -604,7 +742,9 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
           {/* Submit Section */}
           <div className="bg-dark-800 rounded-xl p-6 text-center">
             <div className="mb-6">
-              <h3 className="text-lg font-semibold text-white mb-2">Ready to Submit?</h3>
+              <h3 className="text-lg font-semibold text-white mb-2">
+                {canEdit ? 'Ready to Submit?' : 'Assignment Submitted'}
+              </h3>
               <p className="text-dark-300">
                 You have answered {getAnsweredCount()} out of {assignment.questions.length} questions.
                 {assignment.questions.filter(q => q.required).length > 0 && (
@@ -613,22 +753,48 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                   </span>
                 )}
               </p>
-              {!canSubmitAssignment() && (
+              {canEdit && !canSubmitAssignment() && (
                 <p className="text-orange-400 text-sm mt-2">
                   Please answer all required questions before submitting.
                 </p>
               )}
+              {!canEdit && (
+                <p className="text-blue-400 text-sm mt-2">
+                  The deadline has passed. You can no longer edit your answers.
+                </p>
+              )}
             </div>
 
-            <Button
-              onClick={handleSubmit}
-              disabled={!canSubmitAssignment() || isLoading}
-              loading={isLoading}
-              size="lg"
-              icon={<Send className="h-4 w-4" />}
-            >
-              Submit Assignment
-            </Button>
+            <div className="flex justify-center space-x-3">
+              {canEdit ? (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleAutoSave()}
+                    disabled={!hasUnsavedChanges}
+                    icon={<Save className="h-4 w-4" />}
+                  >
+                    Save Draft
+                  </Button>
+                  <Button
+                    onClick={() => handleSubmit(true)}
+                    disabled={!canSubmitAssignment() || isLoading}
+                    loading={isLoading}
+                    size="lg"
+                    icon={<Send className="h-4 w-4" />}
+                  >
+                    Submit Final Answer
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  onClick={() => setShowResults(true)}
+                  icon={<Eye className="h-4 w-4" />}
+                >
+                  View Results
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>

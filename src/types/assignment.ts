@@ -33,7 +33,9 @@ export interface AssignmentSubmission {
   userId: string;
   assignmentId: string;
   answers: Record<string, any>;
-  submittedAt: string;
+  submittedAt?: string; // Only set when finally submitted
+  lastSavedAt?: string; // For draft saves
+  isSubmitted: boolean; // New field to distinguish drafts from final submissions
   isLate: boolean;
   score?: number;
   feedback?: string;
@@ -48,6 +50,7 @@ export interface AssignmentResult {
   assignment: Assignment;
   feedback: AssignmentQuestionFeedback[];
   canViewAnswers: boolean;
+  deadlinePassed: boolean; // New field to track deadline status
 }
 
 export interface AssignmentQuestionFeedback {

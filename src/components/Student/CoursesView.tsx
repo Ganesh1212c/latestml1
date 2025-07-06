@@ -18,7 +18,9 @@ import {
   Eye,
   EyeOff,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  Edit3,
+  Save
 } from 'lucide-react';
 import Card from '../UI/Card';
 import Button from '../UI/Button';
@@ -36,7 +38,9 @@ import {
   calculateAssignmentResult,
   canSubmitAssignment,
   isAssignmentOverdue,
-  getTimeRemaining
+  getTimeRemaining,
+  canEditAssignment,
+  getDraftSubmission
 } from '../../services/assignmentService';
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
@@ -109,7 +113,13 @@ const CoursesView: React.FC = () => {
       // Fetch submissions for each assignment
       if (user) {
         for (const assignment of publishedAssignments) {
-          const submission = await getLatestSubmission(user.uid, assignment.id);
+          // First check for draft submission
+          const draftSubmission = await getDraftSubmission(user.uid, assignment.id);
+          const finalSubmission = await getLatestSubmission(user.uid, assignment.id);
+          
+          // Use draft if it exists and no final submission, otherwise use final submission
+          const submission = finalSubmission || draftSubmission;
+          
           setAssignmentSubmissions(prev => ({
             ...prev,
             [assignment.id]: submission
@@ -169,7 +179,7 @@ const CoursesView: React.FC = () => {
     // Assignment started - no additional action needed
   };
 
-  const handleAssignmentSubmit = async (answers: Record<string, any>) => {
+  const handleAssignmentSubmit = async (answers: Record<string, any>, isFinal: boolean) => {
     if (!user || !selectedAssignment) return;
 
     setAssignmentLoading(true);
@@ -177,22 +187,26 @@ const CoursesView: React.FC = () => {
     try {
       const now = new Date();
       const dueDate = new Date(selectedAssignment.dueDate);
-      const isLate = now > dueDate;
+      const isLate = now > dueDate && isFinal;
 
       const submission: AssignmentSubmission = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: isFinal ? Math.random().toString(36).substr(2, 9) : `${user.uid}_${selectedAssignment.id}_draft`,
         userId: user.uid,
         assignmentId: selectedAssignment.id,
         answers,
-        submittedAt: now.toISOString(),
+        submittedAt: isFinal ? now.toISOString() : undefined,
+        lastSavedAt: !isFinal ? now.toISOString() : undefined,
+        isSubmitted: isFinal,
         isLate,
         autoGraded: true,
         timeSpent: 0 // This would be calculated based on start time
       };
 
-      // Auto-grade the submission
-      const score = await autoGradeSubmission(submission, selectedAssignment);
-      submission.score = score;
+      // Only auto-grade if it's a final submission and deadline has passed
+      if (isFinal && now > dueDate) {
+        const score = await autoGradeSubmission(submission, selectedAssignment);
+        submission.score = score;
+      }
 
       await saveAssignmentSubmission(submission);
       
@@ -209,15 +223,21 @@ const CoursesView: React.FC = () => {
         [selectedAssignment.id]: result
       }));
 
-      // Update student progress
-      await updateStudentProgress(user.uid, selectedCourse?.id || '', {
-        completedAssignments: [selectedAssignment.id],
-        lastAccessed: new Date().toISOString()
-      });
+      // Update student progress only for final submissions
+      if (isFinal) {
+        await updateStudentProgress(user.uid, selectedCourse?.id || '', {
+          completedAssignments: [selectedAssignment.id],
+          lastAccessed: new Date().toISOString()
+        });
+      }
 
-      toast.success('Assignment submitted successfully!');
+      if (isFinal) {
+        toast.success('Assignment submitted successfully!');
+      } else {
+        toast.success('Draft saved successfully!');
+      }
     } catch (error) {
-      toast.error('Failed to submit assignment');
+      toast.error(isFinal ? 'Failed to submit assignment' : 'Failed to save draft');
       console.error('Assignment submission error:', error);
     } finally {
       setAssignmentLoading(false);
@@ -263,7 +283,7 @@ const CoursesView: React.FC = () => {
     const latestSubmission = assignmentSubmissions[selectedAssignment.id];
     const assignmentResult = assignmentResults[selectedAssignment.id];
     const submissions = latestSubmission ? [latestSubmission] : [];
-    const canSubmit = canSubmitAssignment(selectedAssignment, submissions);
+    const canSubmit = canSubmitAssignment(selectedAssignment, submissions.filter(s => s.isSubmitted));
 
     return (
       <AssignmentInterface
@@ -513,15 +533,20 @@ const CoursesView: React.FC = () => {
                                   const isOverdue = isAssignmentOverdue(assignment);
                                   const timeLeft = getTimeRemaining(assignment.dueDate);
                                   const submissions = submission ? [submission] : [];
-                                  const canSubmit = canSubmitAssignment(assignment, submissions);
+                                  const finalSubmissions = submissions.filter(s => s.isSubmitted);
+                                  const canSubmit = canSubmitAssignment(assignment, finalSubmissions);
+                                  const canEdit = canEditAssignment(assignment);
+                                  const deadlinePassed = result?.deadlinePassed || false;
 
                                   return (
                                     <div key={assignment.id} className="bg-dark-800 p-4 rounded-lg">
                                       <div className="flex items-center justify-between">
                                         <div className="flex items-center space-x-3">
                                           <div className="w-10 h-10 bg-accent-600 rounded-lg flex items-center justify-center">
-                                            {submission ? (
+                                            {submission?.isSubmitted ? (
                                               <CheckCircle className="h-5 w-5 text-white" />
+                                            ) : submission && !submission.isSubmitted ? (
+                                              <Save className="h-5 w-5 text-white" />
                                             ) : (
                                               <Award className="h-5 w-5 text-white" />
                                             )}
@@ -534,9 +559,14 @@ const CoursesView: React.FC = () => {
                                                 <Clock className="h-3 w-3 mr-1" />
                                                 {timeLeft}
                                               </span>
-                                              {submission && (
+                                              {submission?.isSubmitted && deadlinePassed && submission.score !== undefined && (
                                                 <span className="text-accent-400">
                                                   Score: {submission.score}%
+                                                </span>
+                                              )}
+                                              {submission && !submission.isSubmitted && (
+                                                <span className="text-blue-400">
+                                                  Draft saved
                                                 </span>
                                               )}
                                             </div>
@@ -546,7 +576,7 @@ const CoursesView: React.FC = () => {
                                         <div className="flex items-center space-x-2">
                                           {week.isActive ? (
                                             <>
-                                              {submission ? (
+                                              {submission?.isSubmitted ? (
                                                 <div className="flex items-center space-x-2">
                                                   <Button
                                                     size="sm"
@@ -556,7 +586,7 @@ const CoursesView: React.FC = () => {
                                                   >
                                                     View Results
                                                   </Button>
-                                                  {canSubmit && (
+                                                  {canSubmit && deadlinePassed && (
                                                     <Button
                                                       size="sm"
                                                       onClick={() => handleAssignmentSelect(assignment)}
@@ -565,6 +595,17 @@ const CoursesView: React.FC = () => {
                                                       Retake
                                                     </Button>
                                                   )}
+                                                </div>
+                                              ) : submission && !submission.isSubmitted ? (
+                                                <div className="flex items-center space-x-2">
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => handleAssignmentSelect(assignment)}
+                                                    icon={<Edit3 className="h-4 w-4" />}
+                                                  >
+                                                    Continue
+                                                  </Button>
                                                 </div>
                                               ) : (
                                                 <Button
@@ -589,7 +630,7 @@ const CoursesView: React.FC = () => {
                                         <p className="text-dark-300 text-sm mt-3">{assignment.description}</p>
                                       )}
 
-                                      {isOverdue && !submission && (
+                                      {isOverdue && !submission?.isSubmitted && (
                                         <div className="mt-3 flex items-center text-red-400 text-sm">
                                           <AlertTriangle className="h-4 w-4 mr-1" />
                                           This assignment is overdue

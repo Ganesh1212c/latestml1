@@ -101,16 +101,44 @@ export const deleteAssignment = async (assignmentId: string): Promise<void> => {
   }
 };
 
-// Assignment Submissions
+// Assignment Submissions - Modified to support draft submissions
 export const saveAssignmentSubmission = async (submission: AssignmentSubmission): Promise<void> => {
   try {
-    const submissionData = {
-      ...submission,
-      submittedAt: submission.submittedAt || serverTimestamp(),
-      createdAt: serverTimestamp()
-    };
+    // Check if this is a draft or final submission
+    const isDraft = !submission.isSubmitted;
     
-    await addDoc(collection(db, 'assignment_submissions'), submissionData);
+    if (isDraft) {
+      // For drafts, use a predictable ID so we can update the same draft
+      const draftId = `${submission.userId}_${submission.assignmentId}_draft`;
+      const submissionRef = doc(db, 'assignment_submissions', draftId);
+      
+      const submissionData = {
+        ...submission,
+        id: draftId,
+        lastSavedAt: serverTimestamp(),
+        createdAt: submission.createdAt || serverTimestamp()
+      };
+      
+      await setDoc(submissionRef, submissionData, { merge: true });
+    } else {
+      // For final submissions, create a new document
+      const submissionData = {
+        ...submission,
+        submittedAt: submission.submittedAt || serverTimestamp(),
+        createdAt: serverTimestamp()
+      };
+      
+      await addDoc(collection(db, 'assignment_submissions'), submissionData);
+      
+      // Remove any existing draft
+      const draftId = `${submission.userId}_${submission.assignmentId}_draft`;
+      try {
+        await deleteDoc(doc(db, 'assignment_submissions', draftId));
+      } catch (error) {
+        // Draft might not exist, which is fine
+      }
+    }
+    
     console.log('Assignment submission saved successfully');
   } catch (error) {
     console.error('Error saving assignment submission:', error);
@@ -130,10 +158,15 @@ export const getAssignmentSubmissions = async (userId: string, assignmentId: str
     const submissions = querySnapshot.docs.map(doc => ({
       ...doc.data(),
       submittedAt: convertTimestamp(doc.data().submittedAt),
-      gradedAt: convertTimestamp(doc.data().gradedAt)
+      gradedAt: convertTimestamp(doc.data().gradedAt),
+      lastSavedAt: convertTimestamp(doc.data().lastSavedAt)
     })) as AssignmentSubmission[];
     
-    return submissions.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+    return submissions.sort((a, b) => {
+      const aTime = a.submittedAt || a.lastSavedAt || '0';
+      const bTime = b.submittedAt || b.lastSavedAt || '0';
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
   } catch (error) {
     console.error('Error fetching assignment submissions:', error);
     return [];
@@ -150,8 +183,38 @@ export const getLatestSubmission = async (userId: string, assignmentId: string):
   }
 };
 
-// Auto-grading
+// Get draft submission specifically
+export const getDraftSubmission = async (userId: string, assignmentId: string): Promise<AssignmentSubmission | null> => {
+  try {
+    const draftId = `${userId}_${assignmentId}_draft`;
+    const draftRef = doc(db, 'assignment_submissions', draftId);
+    const draftDoc = await getDoc(draftRef);
+    
+    if (draftDoc.exists()) {
+      const data = draftDoc.data();
+      return {
+        ...data,
+        lastSavedAt: convertTimestamp(data.lastSavedAt)
+      } as AssignmentSubmission;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error fetching draft submission:', error);
+    return null;
+  }
+};
+
+// Auto-grading - Only calculate score after deadline
 export const autoGradeSubmission = async (submission: AssignmentSubmission, assignment: Assignment): Promise<number> => {
+  // Don't calculate score if deadline hasn't passed
+  const now = new Date();
+  const deadline = new Date(assignment.dueDate);
+  
+  if (now < deadline && !submission.isSubmitted) {
+    return 0; // Return 0 for drafts before deadline
+  }
+  
   let totalPoints = 0;
   let earnedPoints = 0;
 
@@ -186,38 +249,42 @@ export const autoGradeSubmission = async (submission: AssignmentSubmission, assi
   return finalScore;
 };
 
-// Assignment Results and Feedback
+// Assignment Results and Feedback - Modified to respect deadline
 export const calculateAssignmentResult = async (submission: AssignmentSubmission, assignment: Assignment): Promise<AssignmentResult> => {
   const now = new Date();
   const dueDate = new Date(assignment.dueDate);
-  const canViewAnswers = assignment.showAnswersAfterDeadline && now > dueDate;
+  const deadlinePassed = now > dueDate;
+  const canViewAnswers = deadlinePassed && assignment.showAnswersAfterDeadline;
 
   const feedback: AssignmentQuestionFeedback[] = assignment.questions.map(question => {
     const userAnswer = submission.answers[question.id];
     let isCorrect: boolean | undefined = undefined;
     let earnedPoints = 0;
     
-    if (question.type === 'multiple-choice') {
-      isCorrect = userAnswer === question.correctAnswer;
-      earnedPoints = isCorrect ? question.points : 0;
-    } else if (question.type === 'short-answer') {
-      const correct = question.correctAnswer?.toString().toLowerCase().trim();
-      const user = userAnswer?.toString().toLowerCase().trim();
-      isCorrect = correct === user;
-      earnedPoints = isCorrect ? question.points : 0;
-    } else {
-      // Essay and file-upload questions require manual grading
-      earnedPoints = 0; // Will be updated when manually graded
+    // Only calculate correctness after deadline
+    if (deadlinePassed) {
+      if (question.type === 'multiple-choice') {
+        isCorrect = userAnswer === question.correctAnswer;
+        earnedPoints = isCorrect ? question.points : 0;
+      } else if (question.type === 'short-answer') {
+        const correct = question.correctAnswer?.toString().toLowerCase().trim();
+        const user = userAnswer?.toString().toLowerCase().trim();
+        isCorrect = correct === user;
+        earnedPoints = isCorrect ? question.points : 0;
+      } else {
+        // Essay and file-upload questions require manual grading
+        earnedPoints = 0; // Will be updated when manually graded
+      }
     }
     
     return {
       questionId: question.id,
-      isCorrect,
+      isCorrect: deadlinePassed ? isCorrect : undefined,
       userAnswer,
       correctAnswer: canViewAnswers ? question.correctAnswer : undefined,
       explanation: canViewAnswers ? question.explanation : undefined,
       points: question.points,
-      earnedPoints,
+      earnedPoints: deadlinePassed ? earnedPoints : 0,
       feedback: undefined // Will be added during manual grading
     };
   });
@@ -226,7 +293,8 @@ export const calculateAssignmentResult = async (submission: AssignmentSubmission
     submission,
     assignment,
     feedback,
-    canViewAnswers
+    canViewAnswers,
+    deadlinePassed
   };
 };
 
@@ -244,12 +312,23 @@ export const canSubmitAssignment = (assignment: Assignment, submissions: Assignm
     return false;
   }
   
+  // Count only final submissions (not drafts)
+  const finalSubmissions = submissions.filter(s => s.isSubmitted);
+  
   // Check if max attempts reached
-  if (submissions.length >= assignment.maxAttempts && assignment.maxAttempts > 0) {
+  if (finalSubmissions.length >= assignment.maxAttempts && assignment.maxAttempts > 0) {
     return false;
   }
   
   return true;
+};
+
+export const canEditAssignment = (assignment: Assignment): boolean => {
+  const now = new Date();
+  const dueDate = new Date(assignment.dueDate);
+  
+  // Can edit until deadline passes
+  return now <= dueDate;
 };
 
 export const getTimeRemaining = (dueDate: string): string => {
@@ -258,7 +337,7 @@ export const getTimeRemaining = (dueDate: string): string => {
   const diff = due.getTime() - now.getTime();
   
   if (diff <= 0) {
-    return 'Overdue';
+    return 'Deadline passed';
   }
   
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
