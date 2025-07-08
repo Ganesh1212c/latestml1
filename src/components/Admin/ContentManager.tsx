@@ -38,12 +38,12 @@ import {
   deleteWeek,
   createLecture,
   updateLecture,
-  deleteLecture
+  deleteLecture,
+  deleteAssignment
 } from '../../services/database';
 import { 
   saveAssignment,
-  getWeekAssignments,
-  deleteAssignment
+  getWeekAssignments
 } from '../../services/assignmentService';
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
@@ -295,11 +295,11 @@ const ContentManager: React.FC = () => {
     }
   };
 
-  const handleDeleteAssignment = async (assignmentId: string) => {
+  const handleDeleteAssignment = async (assignmentId: string, weekId: string) => {
     if (!confirm('Are you sure you want to delete this assignment?')) return;
 
     try {
-      await deleteAssignment(assignmentId);
+      await deleteAssignment(selectedCourse!.id, weekId, assignmentId);
       // Refresh assignments for all weeks
       weeks.forEach(week => {
         fetchWeekAssignments(week.id);
@@ -643,7 +643,7 @@ const ContentManager: React.FC = () => {
                                         <Button
                                           size="sm"
                                           variant="ghost"
-                                          onClick={() => handleDeleteAssignment(assignment.id)}
+                                          onClick={() => handleDeleteAssignment(assignment.id, week.id)}
                                           icon={<Trash2 className="h-4 w-4" />}
                                         />
                                       </div>
