@@ -38,12 +38,12 @@ import {
   deleteWeek,
   createLecture,
   updateLecture,
-  deleteLecture,
-  deleteAssignment
+  deleteLecture
 } from '../../services/database';
 import { 
   saveAssignment,
-} from '../../services/assignmentService';
+  getWeekAssignments,
+  deleteAssignment,
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
 
@@ -80,14 +80,9 @@ const ContentManager: React.FC = () => {
   }, [selectedCourse]);
 
   useEffect(() => {
-    // Populate assignments from weeks data
+    // Fetch assignments for all weeks
     weeks.forEach(week => {
-      if (week.assignments) {
-        setWeekAssignments(prev => ({
-          ...prev,
-          [week.id]: week.assignments
-        }));
-      }
+      fetchWeekAssignments(week.id);
     });
   }, [weeks]);
 
@@ -111,6 +106,18 @@ const ContentManager: React.FC = () => {
       setWeeks(weeksData);
     } catch (error) {
       toast.error('Failed to fetch weeks');
+    }
+  };
+
+  const fetchWeekAssignments = async (weekId: string) => {
+    try {
+      const assignments = await getWeekAssignments(weekId);
+      setWeekAssignments(prev => ({
+        ...prev,
+        [weekId]: assignments
+      }));
+    } catch (error) {
+      console.error('Failed to fetch week assignments:', error);
     }
   };
 
@@ -277,9 +284,12 @@ const ContentManager: React.FC = () => {
 
   const handleSaveAssignment = async (assignmentData: Assignment) => {
     try {
-      await saveAssignment(selectedWeekId, assignmentData);
-      // Refresh weeks data to get updated assignments
-      await fetchWeeks(selectedCourse!.id);
+      if (assignmentData.id && editingAssignment) {
+        await updateAssignment(selectedCourse!.id, selectedWeekId, assignmentData.id, assignmentData);
+      } else {
+        await createAssignment(selectedCourse!.id, selectedWeekId, assignmentData);
+      }
+      await fetchWeekAssignments(selectedWeekId);
       setShowAssignmentModal(false);
       setEditingAssignment(null);
       toast.success('Assignment saved successfully!');
@@ -288,13 +298,15 @@ const ContentManager: React.FC = () => {
     }
   };
 
-  const handleDeleteAssignment = async (assignmentId: string, weekId: string) => {
+  const handleDeleteAssignment = async (assignmentId: string) => {
     if (!confirm('Are you sure you want to delete this assignment?')) return;
 
     try {
-      await deleteAssignment(selectedCourse!.id, weekId, assignmentId);
-      // Refresh weeks data to get updated assignments
-      await fetchWeeks(selectedCourse!.id);
+      await deleteAssignment(assignmentId);
+      // Refresh assignments for all weeks
+      weeks.forEach(week => {
+        fetchWeekAssignments(week.id);
+      });
       toast.success('Assignment deleted successfully!');
     } catch (error) {
       toast.error('Failed to delete assignment');
@@ -634,7 +646,7 @@ const ContentManager: React.FC = () => {
                                         <Button
                                           size="sm"
                                           variant="ghost"
-                                          onClick={() => handleDeleteAssignment(assignment.id, week.id)}
+                                          onClick={() => handleDeleteAssignment(assignment.id)}
                                           icon={<Trash2 className="h-4 w-4" />}
                                         />
                                       </div>

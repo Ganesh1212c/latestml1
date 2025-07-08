@@ -1,5 +1,3 @@
-import { Assignment } from './assignment';
-
 export interface User {
   uid: string;
   email: string;
@@ -67,6 +65,30 @@ export interface Activity {
   points: number;
   timeLimit?: number;
   attempts: number;
+}
+
+export interface Assignment {
+  id: string;
+  weekId: string;
+  title: string;
+  description: string;
+  type: 'homework' | 'quiz' | 'project';
+  questions: Question[];
+  totalPoints: number;
+  dueDate: string;
+  timeLimit?: number;
+  attempts: number;
+  isPublished: boolean;
+}
+
+export interface Question {
+  id: string;
+  text: string;
+  type: 'multiple-choice' | 'short-answer' | 'essay';
+  options?: string[];
+  correctAnswer?: string | number;
+  points: number;
+  explanation?: string;
 }
 
 export interface StudentProgress {
