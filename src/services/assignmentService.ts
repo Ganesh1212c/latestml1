@@ -337,17 +337,7 @@ export const getTimeRemaining = (dueDate: string): string => {
   const diff = due.getTime() - now.getTime();
   
   if (diff <= 0) {
-    const overdue = Math.abs(diff);
-    const days = Math.floor(overdue / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((overdue % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    
-    if (days > 0) {
-      return `${days}d ${hours}h overdue`;
-    } else if (hours > 0) {
-      return `${hours}h overdue`;
-    } else {
-      return 'Just overdue';
-    }
+    return 'Deadline passed';
   }
   
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -359,6 +349,6 @@ export const getTimeRemaining = (dueDate: string): string => {
   } else if (hours > 0) {
     return `${hours}h ${minutes}m remaining`;
   } else {
-    return `${Math.max(0, minutes)}m remaining`;
+    return `${minutes}m remaining`;
   }
 };

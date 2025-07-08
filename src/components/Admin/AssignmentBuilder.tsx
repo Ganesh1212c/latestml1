@@ -21,20 +21,6 @@ import Modal from '../UI/Modal';
 import { Assignment, AssignmentQuestion } from '../../types/assignment';
 import toast from 'react-hot-toast';
 
-// Helper function to format date for datetime-local input
-const formatDateTimeLocal = (dateString: string): string => {
-  try {
-    const date = new Date(dateString);
-    // Adjust for timezone offset to show local time
-    const offset = date.getTimezoneOffset();
-    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
-    return localDate.toISOString().slice(0, 16);
-  } catch (error) {
-    console.error('Error formatting date:', error);
-    return '';
-  }
-};
-
 interface AssignmentBuilderProps {
   assignment?: Assignment;
   onSave: (assignment: Assignment) => void;
@@ -56,7 +42,7 @@ const AssignmentBuilder: React.FC<AssignmentBuilderProps> = ({
     instructions: '',
     questions: [],
     totalPoints: 0,
-    dueDate: assignment?.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Default to 1 week from now
+    dueDate: '',
     allowLateSubmission: false,
     latePenalty: 10,
     maxAttempts: 1,
@@ -90,14 +76,6 @@ const AssignmentBuilder: React.FC<AssignmentBuilderProps> = ({
 
     if (!assignmentData.dueDate) {
       toast.error('Due date is required');
-      return;
-    }
-
-    // Validate that due date is in the future
-    const dueDate = new Date(assignmentData.dueDate);
-    const now = new Date();
-    if (dueDate <= now) {
-      toast.error('Due date must be in the future');
       return;
     }
 
@@ -219,19 +197,10 @@ const AssignmentBuilder: React.FC<AssignmentBuilderProps> = ({
               </label>
               <input
                 type="datetime-local"
-                value={assignmentData.dueDate ? formatDateTimeLocal(assignmentData.dueDate) : ''}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    setAssignmentData(prev => ({ ...prev, dueDate: new Date(e.target.value).toISOString() }));
-                  }
-                }}
+                value={assignmentData.dueDate ? new Date(assignmentData.dueDate).toISOString().slice(0, 16) : ''}
+                onChange={(e) => setAssignmentData(prev => ({ ...prev, dueDate: new Date(e.target.value).toISOString() }))}
                 className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
-              {assignmentData.dueDate && (
-                <p className="text-xs text-dark-400 mt-1">
-                  Due: {new Date(assignmentData.dueDate).toLocaleString()}
-                </p>
-              )}
             </div>
 
             <div>
