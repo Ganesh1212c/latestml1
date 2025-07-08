@@ -132,6 +132,12 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
     setHasUnsavedChanges(true);
   };
 
+  const validateSubmission = (): boolean => {
+    const requiredQuestions = assignment.questions.filter(q => q.required);
+    const answeredRequired = requiredQuestions.filter(q => answers[q.id] !== undefined && answers[q.id] !== '');
+    return answeredRequired.length === requiredQuestions.length;
+  };
+
   const handleAutoSave = () => {
     if (!canEdit) return;
     
@@ -141,6 +147,17 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
   };
 
   const handleSubmit = (isFinal: boolean = true) => {
+    if (isFinal && !validateSubmission()) {
+      toast.error('Please answer all required questions before submitting.');
+      return;
+    }
+
+    console.log('Assignment submit called:', {
+      isFinal,
+      answersCount: Object.keys(answers).length,
+      canSubmitAssignment: canSubmitAssignment()
+    });
+
     setAssignmentCompleted(isFinal);
     onSubmit(answers, isFinal);
     setHasUnsavedChanges(false);
@@ -149,6 +166,8 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
       setLastSaved(new Date());
     }
   };
+
+  const handleFinalSubmit = () => handleSubmit(true);
 
   const handleRetake = () => {
     setAssignmentStarted(false);
@@ -185,7 +204,7 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
   const canSubmitAssignment = (): boolean => {
     const requiredQuestions = assignment.questions.filter(q => q.required);
     const requiredAnswered = getRequiredAnsweredCount();
-    return requiredAnswered === requiredQuestions.length;
+    return requiredAnswered === requiredQuestions.length && Object.keys(answers).length > 0;
   };
 
   // Full screen overlay
@@ -784,7 +803,7 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                     Save Draft
                   </Button>
                   <Button
-                    onClick={() => handleSubmit(true)}
+                    onClick={handleFinalSubmit}
                     disabled={!canSubmitAssignment() || isLoading}
                     loading={isLoading}
                     size="lg"

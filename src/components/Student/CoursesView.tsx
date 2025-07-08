@@ -182,6 +182,13 @@ const CoursesView: React.FC = () => {
   const handleAssignmentSubmit = async (answers: Record<string, any>, isFinal: boolean) => {
     if (!user || !selectedAssignment) return;
 
+    console.log('Starting assignment submission:', {
+      userId: user.uid,
+      assignmentId: selectedAssignment.id,
+      isFinal,
+      answersCount: Object.keys(answers).length
+    });
+
     setAssignmentLoading(true);
     
     try {
@@ -202,6 +209,8 @@ const CoursesView: React.FC = () => {
         timeSpent: 0 // This would be calculated based on start time
       };
 
+      console.log('Submission object created:', submission);
+
       // Only auto-grade if it's a final submission and deadline has passed
       if (isFinal && now > dueDate) {
         const score = await autoGradeSubmission(submission, selectedAssignment);
@@ -209,6 +218,7 @@ const CoursesView: React.FC = () => {
       }
 
       await saveAssignmentSubmission(submission);
+      console.log('Assignment submission saved successfully');
       
       // Update local state
       setAssignmentSubmissions(prev => ({
@@ -237,6 +247,7 @@ const CoursesView: React.FC = () => {
         toast.success('Draft saved successfully!');
       }
     } catch (error) {
+      console.error('Assignment submission error:', error);
       toast.error(isFinal ? 'Failed to submit assignment' : 'Failed to save draft');
       console.error('Assignment submission error:', error);
     } finally {
