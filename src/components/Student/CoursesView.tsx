@@ -31,7 +31,6 @@ import { Course, Week, Lecture } from '../../types';
 import { Assignment, AssignmentSubmission, AssignmentResult } from '../../types/assignment';
 import { getCourses, getWeeks, updateStudentProgress } from '../../services/database';
 import { 
-  getWeekAssignments, 
   getLatestSubmission, 
   saveAssignmentSubmission, 
   autoGradeSubmission,
@@ -72,11 +71,46 @@ const CoursesView: React.FC = () => {
   }, [selectedCourse]);
 
   useEffect(() => {
-    // Fetch assignments for all weeks
+    // Populate assignments from weeks data and fetch submissions
     weeks.forEach(week => {
-      fetchWeekAssignments(week.id);
+      if (week.assignments) {
+        const publishedAssignments = week.assignments.filter(a => a.isPublished);
+        setWeekAssignments(prev => ({
+          ...prev,
+          [week.id]: publishedAssignments
+        }));
+
+        // Fetch submissions for each assignment
+        if (user) {
+          publishedAssignments.forEach(async (assignment) => {
+            try {
+              // First check for draft submission
+              const draftSubmission = await getDraftSubmission(user.uid, assignment.id);
+              const finalSubmission = await getLatestSubmission(user.uid, assignment.id);
+              
+              // Use draft if it exists and no final submission, otherwise use final submission
+              const submission = finalSubmission || draftSubmission;
+              
+              setAssignmentSubmissions(prev => ({
+                ...prev,
+                [assignment.id]: submission
+              }));
+
+              // Calculate result if submission exists
+              if (submission) {
+                const result = await calculateAssignmentResult(submission, assignment);
+                setAssignmentResults(prev => ({
+                  ...prev,
+                  [assignment.id]: result
+                }));
+              }
+            } catch (error) {
+              console.error('Failed to fetch assignment data:', error);
+            }
+          });
+        }
+      }
     });
-  }, [weeks]);
 
   const fetchCourses = async () => {
     try {
@@ -98,45 +132,6 @@ const CoursesView: React.FC = () => {
       setWeeks(weeksData);
     } catch (error) {
       toast.error('Failed to fetch course content');
-    }
-  };
-
-  const fetchWeekAssignments = async (weekId: string) => {
-    try {
-      const assignments = await getWeekAssignments(weekId);
-      const publishedAssignments = assignments.filter(a => a.isPublished);
-      setWeekAssignments(prev => ({
-        ...prev,
-        [weekId]: publishedAssignments
-      }));
-
-      // Fetch submissions for each assignment
-      if (user) {
-        for (const assignment of publishedAssignments) {
-          // First check for draft submission
-          const draftSubmission = await getDraftSubmission(user.uid, assignment.id);
-          const finalSubmission = await getLatestSubmission(user.uid, assignment.id);
-          
-          // Use draft if it exists and no final submission, otherwise use final submission
-          const submission = finalSubmission || draftSubmission;
-          
-          setAssignmentSubmissions(prev => ({
-            ...prev,
-            [assignment.id]: submission
-          }));
-
-          // Calculate result if submission exists
-          if (submission) {
-            const result = await calculateAssignmentResult(submission, assignment);
-            setAssignmentResults(prev => ({
-              ...prev,
-              [assignment.id]: result
-            }));
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch week assignments:', error);
     }
   };
 

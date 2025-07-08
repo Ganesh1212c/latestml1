@@ -43,7 +43,6 @@ import {
 } from '../../services/database';
 import { 
   saveAssignment,
-  getWeekAssignments
 } from '../../services/assignmentService';
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
@@ -81,9 +80,14 @@ const ContentManager: React.FC = () => {
   }, [selectedCourse]);
 
   useEffect(() => {
-    // Fetch assignments for all weeks
+    // Populate assignments from weeks data
     weeks.forEach(week => {
-      fetchWeekAssignments(week.id);
+      if (week.assignments) {
+        setWeekAssignments(prev => ({
+          ...prev,
+          [week.id]: week.assignments
+        }));
+      }
     });
   }, [weeks]);
 
@@ -107,18 +111,6 @@ const ContentManager: React.FC = () => {
       setWeeks(weeksData);
     } catch (error) {
       toast.error('Failed to fetch weeks');
-    }
-  };
-
-  const fetchWeekAssignments = async (weekId: string) => {
-    try {
-      const assignments = await getWeekAssignments(weekId);
-      setWeekAssignments(prev => ({
-        ...prev,
-        [weekId]: assignments
-      }));
-    } catch (error) {
-      console.error('Failed to fetch week assignments:', error);
     }
   };
 
@@ -286,7 +278,8 @@ const ContentManager: React.FC = () => {
   const handleSaveAssignment = async (assignmentData: Assignment) => {
     try {
       await saveAssignment(selectedWeekId, assignmentData);
-      await fetchWeekAssignments(selectedWeekId);
+      // Refresh weeks data to get updated assignments
+      await fetchWeeks(selectedCourse!.id);
       setShowAssignmentModal(false);
       setEditingAssignment(null);
       toast.success('Assignment saved successfully!');
@@ -300,10 +293,8 @@ const ContentManager: React.FC = () => {
 
     try {
       await deleteAssignment(selectedCourse!.id, weekId, assignmentId);
-      // Refresh assignments for all weeks
-      weeks.forEach(week => {
-        fetchWeekAssignments(week.id);
-      });
+      // Refresh weeks data to get updated assignments
+      await fetchWeeks(selectedCourse!.id);
       toast.success('Assignment deleted successfully!');
     } catch (error) {
       toast.error('Failed to delete assignment');
