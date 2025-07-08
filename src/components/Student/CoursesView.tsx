@@ -1,6 +1,116 @@
-Here's the fixed version with all missing closing brackets added:
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  BookOpen, 
+  Play, 
+  Clock, 
+  CheckCircle, 
+  FileText, 
+  Award,
+  Calendar,
+  ArrowRight,
+  Video,
+  Activity,
+  Lock,
+  PlayCircle,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Users,
+  AlertTriangle,
+  Edit3,
+  Save
+} from 'lucide-react';
+import Card from '../UI/Card';
+import Button from '../UI/Button';
+import Modal from '../UI/Modal';
+import LectureViewer from './LectureViewer';
+import AssignmentInterface from './AssignmentInterface';
+import { Course, Week, Lecture } from '../../types';
+import { Assignment, AssignmentSubmission, AssignmentResult } from '../../types/assignment';
+import { getCourses, getWeeks, updateStudentProgress } from '../../services/database';
+import { 
+  getLatestSubmission, 
+  saveAssignmentSubmission, 
+  autoGradeSubmission,
+  calculateAssignmentResult,
+  canSubmitAssignment,
+  isAssignmentOverdue,
+  getTimeRemaining,
+  canEditAssignment,
+  getDraftSubmission
+} from '../../services/assignmentService';
+import { useAuth } from '../../hooks/useAuth';
+import toast from 'react-hot-toast';
 
-```javascript
+const CoursesView: React.FC = () => {
+  const { user } = useAuth();
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [weeks, setWeeks] = useState<Week[]>([]);
+  const [weekAssignments, setWeekAssignments] = useState<Record<string, Assignment[]>>({});
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
+  const [selectedLecture, setSelectedLecture] = useState<Lecture | null>(null);
+  const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
+  const [assignmentSubmissions, setAssignmentSubmissions] = useState<Record<string, AssignmentSubmission | null>>({});
+  const [assignmentResults, setAssignmentResults] = useState<Record<string, AssignmentResult | null>>({});
+  const [loading, setLoading] = useState(true);
+  const [showLectureViewer, setShowLectureViewer] = useState(false);
+  const [showAssignmentInterface, setShowAssignmentInterface] = useState(false);
+  const [assignmentLoading, setAssignmentLoading] = useState(false);
+
+  useEffect(() => {
+    fetchCourses();
+  }, []);
+
+  useEffect(() => {
+    if (selectedCourse) {
+      fetchWeeks(selectedCourse.id);
+    }
+  }, [selectedCourse]);
+
+  useEffect(() => {
+    // Populate assignments from weeks data and fetch submissions
+    weeks.forEach(week => {
+      if (week.assignments) {
+        const publishedAssignments = week.assignments.filter(a => a.isPublished);
+        setWeekAssignments(prev => ({
+          ...prev,
+          [week.id]: publishedAssignments
+        }));
+
+        // Fetch submissions for each assignment
+        if (user) {
+          publishedAssignments.forEach(async (assignment) => {
+            try {
+              // First check for draft submission
+              const draftSubmission = await getDraftSubmission(user.uid, assignment.id);
+              const finalSubmission = await getLatestSubmission(user.uid, assignment.id);
+              
+              // Use draft if it exists and no final submission, otherwise use final submission
+              const submission = finalSubmission || draftSubmission;
+              
+              setAssignmentSubmissions(prev => ({
+                ...prev,
+                [assignment.id]: submission
+              }));
+
+              // Calculate result if submission exists
+              if (submission) {
+                const result = await calculateAssignmentResult(submission, assignment);
+                setAssignmentResults(prev => ({
+                  ...prev,
+                  [assignment.id]: result
+                }));
+              }
+            } catch (error) {
+              console.error('Failed to fetch assignment data:', error);
+            }
+          });
+        }
+      }
+    });
   }, [weeks, user]);
 
   const fetchCourses = async () => {
@@ -23,45 +133,6 @@ Here's the fixed version with all missing closing brackets added:
       setWeeks(weeksData);
     } catch (error) {
       toast.error('Failed to fetch course content');
-    }
-  };
-
-  const fetchWeekAssignments = async (weekId: string) => {
-    try {
-      const assignments = await getWeekAssignments(weekId);
-      const publishedAssignments = assignments.filter(a => a.isPublished);
-      setWeekAssignments(prev => ({
-        ...prev,
-        [weekId]: publishedAssignments
-      }));
-
-      // Fetch submissions for each assignment
-      if (user) {
-        for (const assignment of publishedAssignments) {
-          // First check for draft submission
-          const draftSubmission = await getDraftSubmission(user.uid, assignment.id);
-          const finalSubmission = await getLatestSubmission(user.uid, assignment.id);
-          
-          // Use draft if it exists and no final submission, otherwise use final submission
-          const submission = finalSubmission || draftSubmission;
-          
-          setAssignmentSubmissions(prev => ({
-            ...prev,
-            [assignment.id]: submission
-          }));
-
-          // Calculate result if submission exists
-          if (submission) {
-            const result = await calculateAssignmentResult(submission, assignment);
-            setAssignmentResults(prev => ({
-              ...prev,
-              [assignment.id]: result
-            }));
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch week assignments:', error);
     }
   };
 
@@ -601,4 +672,3 @@ Here's the fixed version with all missing closing brackets added:
 };
 
 export default CoursesView;
-```
