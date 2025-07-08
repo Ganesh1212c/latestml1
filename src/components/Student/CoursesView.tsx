@@ -557,6 +557,9 @@ const CoursesView: React.FC = () => {
                                               <span>{assignment.totalPoints} points</span>
                                               <span className={`flex items-center ${isOverdue ? 'text-red-400' : 'text-dark-400'}`}>
                                                 <Clock className="h-3 w-3 mr-1" />
+                                                Due: {new Date(assignment.dueDate).toLocaleDateString()} at {new Date(assignment.dueDate).toLocaleTimeString()}
+                                              </span>
+                                              <span className={`text-xs ${isOverdue ? 'text-red-400' : 'text-blue-400'}`}>
                                                 {timeLeft}
                                               </span>
                                               {submission?.isSubmitted && deadlinePassed && submission.score !== undefined && (

@@ -500,8 +500,15 @@ const AssignmentInterface: React.FC<AssignmentInterfaceProps> = ({
                   </span>
                 </div>
                 <p className="text-dark-300 text-sm">
-                  {new Date(assignment.dueDate).toLocaleString()}
+                  {new Date(assignment.dueDate).toLocaleDateString()} at {new Date(assignment.dueDate).toLocaleTimeString()}
                 </p>
+                <div className="mt-2 text-xs text-dark-400">
+                  {isOverdue ? (
+                    <span className="text-red-400">⚠️ This assignment is overdue</span>
+                  ) : (
+                    <span>📅 {timeLeft}</span>
+                  )}
+                </div>
               </div>
 
               {assignment.instructions && (
