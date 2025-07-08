@@ -6,7 +6,7 @@ import {
 } from '../../services/database';
 import { Assignment } from '../../types/assignment';
 import { Card } from '../UI/Card';
-import { Button } from '../UI/Button';
+import Button from '../UI/Button';
 import { Plus, Edit, Trash2, BookOpen } from 'lucide-react';
 
 const ContentManager: React.FC = () => {
